@@ -30,7 +30,8 @@ def configure_logging(config, miner_id=None):
 
     # Filter out 307 Temporary Redirect messages from the log
     # This is a workaround for the issue with the vLLM server logging 307 redirects.
-    logging.getLogger('uvicorn.access').addFilter(lambda record:"307 Temporary Redirect" not in record.args[4])
+    server_logger = logging.getLogger('uvicorn.access')
+    server_logger.addFilter(lambda record:"307 Temporary Redirect" not in getattr(record, 'status_code',None))
 
     # Setup logging with the configured filename and log level
     logging.basicConfig(

@@ -30,7 +30,7 @@ def configure_logging(config, miner_id=None):
 
     # Filter out 307 Temporary Redirect messages from the log
     # This is a workaround for the issue with the vLLM server logging 307 redirects.
-    logging.getLogger('vllm').addFilter(lambda record: "307 Temporary Redirect" not in record.message)
+    logging.getLogger('vllm').addFilter(lambda record:"307 Temporary Redirect" not in record.getMessage())
 
     # Setup logging with the configured filename and log level
     logging.basicConfig(

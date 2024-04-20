@@ -28,6 +28,10 @@ def configure_logging(config, miner_id=None):
     print(f"Configuring log level to: {logging.getLevelName(logging.INFO)}. Log file name: {process_log_filename}")
     # Verifying log level
 
+    # Filter out 307 Temporary Redirect messages from the log
+    # This is a workaround for the issue with the vLLM server logging 307 redirects.
+    logging.getLogger('vllm').addFilter(lambda record: "307 Temporary Redirect" not in record.message)
+
     # Setup logging with the configured filename and log level
     logging.basicConfig(
         filename=process_log_filename,

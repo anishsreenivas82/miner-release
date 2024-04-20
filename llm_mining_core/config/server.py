@@ -38,6 +38,7 @@ class LLMServerConfig:
             "--max-model-len", str(self.MAX_MODEL_LEN),
             "--chat-template", self.CHAT_TEMPLATE,
             "--disable-log-requests",
+            "--uvicorn-log-level","warning",
             "--dtype", "half",
             "--port", str(self.base_config.port),
             "--tensor-parallel-size",str(self.num_gpus),

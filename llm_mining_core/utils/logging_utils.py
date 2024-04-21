@@ -4,7 +4,7 @@ class ExcludeMetricsEndpointFilter(logging.Filter):
     def filter(self, record):
         # Check if the message contains a GET request to the /metrics endpoint
         status_code = record.args[4]
-        if "307 Temporary Redirect" in status_code:
+        if status_code ==307:
             return False  # Do not log this record
         else:
             print(record)

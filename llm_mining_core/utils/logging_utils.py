@@ -1,5 +1,15 @@
 import logging
 
+class ExcludeMetricsEndpointFilter(logging.Filter):
+    def filter(self, record):
+        # Check if the message contains a GET request to the /metrics endpoint
+        status_code = record.args[4]
+        if "307 Temporary Redirect" in status_code:
+            return False  # Do not log this record
+        else:
+            print(record)
+        return True
+
 def configure_logging(config, miner_id=None):
     """
     Configures the logging settings for the miner process.
@@ -31,7 +41,8 @@ def configure_logging(config, miner_id=None):
     # Filter out 307 Temporary Redirect messages from the log
     # This is a workaround for the issue with the vLLM server logging 307 redirects.
     server_logger = logging.getLogger('uvicorn.access')
-    server_logger.addFilter(lambda record:"307 Temporary Redirect" not in getattr(record, 'status_code',None))
+    server_logger.addFilter(ExcludeMetricsEndpointFilter())
+    # server_logger.addFilter(lambda record:"307 Temporary Redirect" not in getattr(record, 'status_code',None))
 
     # Setup logging with the configured filename and log level
     logging.basicConfig(

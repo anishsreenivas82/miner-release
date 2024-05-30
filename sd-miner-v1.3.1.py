@@ -7,12 +7,15 @@ import logging
 import signal
 import threading
 import subprocess
+import json
 from pathlib import Path
 from itertools import cycle
 from dotenv import load_dotenv
 from multiprocessing import Process, set_start_method
 from auth.generator import WalletGenerator
-
+from tabulate import tabulate
+# import pynvml
+ 
 from sd_mining_core.base import BaseConfig, ModelUpdater
 from sd_mining_core.utils import (
     check_cuda, get_hardware_description,
@@ -118,7 +121,7 @@ def send_miner_request(config, model_id, min_deadline):
         if response_data and 'job_id' in response_data and 'model_id' in response_data:
             job_id = response_data['job_id']
             model_id = response_data['model_id']
-            print(f"Processing Request ID: {job_id}. Model ID: {model_id}.")
+            # print(f"Processing Request ID: {job_id}. Model ID: {model_id}.")
     except Exception as e:
         logging.error(f"Failed to process response data: {e}")
 
@@ -153,6 +156,107 @@ def check_and_reload_model(config, last_signal_time):
     # Return the updated or unchanged last_signal_time
     return last_signal_time if current_time - last_signal_time < config.reload_interval else current_time
 
+def parse_log_file(log_file_path):
+    device_info_pattern = re.compile(r"INFO - Device (\d+): (.+)")
+    job_received_pattern = re.compile(r"INFO - Response from server for miner_id .*: (.+)")
+    job_processing_pattern = re.compile(r"INFO - Processing Request ID: (.+). Model ID: (.+).")
+    job_completed_pattern = re.compile(r"INFO - Request ID (.+) completed. Total time: ([\d.]+) s")
+    latency_pattern = re.compile(r"INFO - Latencies - Request: ([\d.]+) s, Loading: ([\d.]+) s, Inference: ([\d.]+) s, Upload: ([\d.]+) s, Submit: ([\d.]+) s")
+ 
+    devices = {}
+    metrics = {
+        'gpu_usage': [],
+        'num_jobs': 0,
+        'success_jobs': 0,
+        'failed_jobs': 0,
+        'latency': [],
+        'jobs_being_processed': 0
+    }
+ 
+    with open(log_file_path, 'r') as log_file:
+        for line in log_file:
+            device_match = device_info_pattern.search(line)
+            if device_match:
+                device_id = int(device_match.group(1))
+                device_name = device_match.group(2)
+                devices[device_id] = {
+                    'Device Name': device_name,
+                    'Status': 'Idle',
+                    'Job ID': None,
+                    'Model ID': None,
+                    'Total Time': None,
+                    'Request Latency': None,
+                    'Loading Latency': None,
+                    'Inference Latency': None,
+                    'Upload Latency': None,
+                    'Submit Latency': None
+                }
+ 
+            if job_received_match := job_received_pattern.search(line):
+                try:
+                    job_response = json.loads(job_received_match.group(1).replace("'", "\""))
+                except json.JSONDecodeError:
+                    continue
+ 
+            if "Processing Request ID" in line:
+                metrics['jobs_being_processed'] += 1
+                metrics['num_jobs'] += 1
+ 
+            # if job_processing_match := job_processing_pattern.search(line):
+            #     device_id = int(job_processing_match.group(1))
+            #     if device_id in devices:
+            #         devices[device_id]['Status'] = 'Processing'
+            #         devices[device_id]['Job ID'] = job_processing_match.group(1)
+            #         devices[device_id]['Model ID'] = job_processing_match.group(2)
+ 
+            if job_completed_match := job_completed_pattern.search(line):
+                metrics['success_jobs'] += 1
+                metrics['jobs_being_processed'] -= 1
+                total_time = float(job_completed_match.group(2))
+                metrics['latency'].append(total_time)
+ 
+            if "WARNING" in line:
+                metrics['failed_jobs'] += 1
+ 
+    # with pynvml.nvmlInit():
+    #     device_count = pynvml.nvmlDeviceGetCount()
+    #     for i in range(device_count):
+    #         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+    #         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+    #         gpu_usage = utilization.gpu
+    #         metrics['gpu_usage'].append(gpu_usage)
+    #     pynvml.nvmlShutdown()
+ 
+    avg_latency = sum(metrics['latency']) / len(metrics['latency']) if metrics['latency'] else 0
+ 
+    return {
+        'gpu_usage': 0,
+        'num_jobs': metrics['num_jobs'],
+        'success_jobs': metrics['success_jobs'],
+        'failed_jobs': metrics['failed_jobs'],
+        'latency': avg_latency,
+        'jobs_being_processed': metrics['jobs_being_processed']
+    }
+ 
+def display_mining_data(metrics):
+    table_data = [
+        ["GPU Usage",  metrics['gpu_usage']],
+        ["Number of Concurrent Jobs", metrics['num_jobs']],
+        ["Successful Jobs", metrics['success_jobs']],
+        ["Failed Jobs", metrics['failed_jobs']],
+        ["Average Latency", f"{metrics['latency']:.2f} s"],
+        ["Jobs Being Processed", metrics['jobs_being_processed']]
+    ]
+ 
+    print(tabulate(table_data, tablefmt="grid"))
+ 
+def display_data_thread(log_file_path, display_interval):
+    while True:
+        metrics = parse_log_file(log_file_path)
+        display_mining_data(metrics)
+        # print("Display Data Thread")
+        time.sleep(display_interval)
+ 
 def process_jobs(config):
     current_model_id = next(iter(config.loaded_models), None)
     current_lora_id = next(iter(config.loaded_loras), None)
@@ -224,6 +328,11 @@ if __name__ == "__main__":
     # Start the model updater in a separate thread
     updater_thread = threading.Thread(target=model_updater.start_scheduled_updates)
     updater_thread.start()
+
+    display_interval = 10  # Display interval in seconds
+    display_thread = threading.Thread(target=display_data_thread, args=('./sd-miner_0_0x1c83C85b57117E73f1195c37316b2E99B481aD6e-7bac77.log', display_interval))
+    display_thread.start()
+ 
     
     # TODO: There appear to be 1 leaked semaphore objects to clean up at shutdown
     # Launch a separate process for each CUDA device

@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from multiprocessing import Process, set_start_method
 from auth.generator import WalletGenerator
 from tabulate import tabulate
+import curses
 # import pynvml
  
 from sd_mining_core.base import BaseConfig, ModelUpdater
@@ -251,11 +252,52 @@ def display_mining_data(metrics):
     print(tabulate(table_data, tablefmt="grid"))
  
 def display_data_thread(log_file_path, display_interval):
-    while True:
-        metrics = parse_log_file(log_file_path)
-        display_mining_data(metrics)
-        # print("Display Data Thread")
-        time.sleep(display_interval)
+    def draw_table(stdscr):
+        curses.curs_set(0)  # Hide the cursor
+        stdscr.nodelay(1)  # Non-blocking input
+
+        while True:
+            metrics = parse_log_file(log_file_path)
+            stdscr.clear()
+            stdscr.addstr(0, 0, "Mining Data")
+
+            table_data = [
+                ["Metric", "Value"],
+                ["GPU Usage",  metrics['gpu_usage']],
+                ["Number of Concurrent Jobs", metrics['num_jobs']],
+                ["Successful Jobs", metrics['success_jobs']],
+                ["Failed Jobs", metrics['failed_jobs']],
+                ["Average Latency", f"{metrics['latency']:.2f} s"],
+                ["Jobs Being Processed", metrics['jobs_being_processed']]
+            ]
+            
+            # Transpose the table data
+            transposed_data = list(zip(*table_data))
+            transposed_data = [list(row) for row in transposed_data]
+
+            table = tabulate(transposed_data, tablefmt="grid")
+
+            try:
+                max_y, max_x = stdscr.getmaxyx()
+                if len(table.splitlines()) + 1 > max_y or len(table.splitlines()[0]) > max_x:
+                    # Handle the case where the table is too large for the screen
+                    stdscr.addstr(1, 0, "Screen too small for table display")
+                else:
+                    stdscr.addstr(1, 0, table)
+            except curses.error:
+                pass  # Ignore curses errors for now
+
+            stdscr.refresh()
+            time.sleep(display_interval)
+
+            # Check for user input to exit
+            try:
+                if stdscr.getch() == ord('q'):
+                    break
+            except curses.error:
+                pass
+
+    curses.wrapper(draw_table)
  
 def process_jobs(config):
     current_model_id = next(iter(config.loaded_models), None)
@@ -305,6 +347,7 @@ if __name__ == "__main__":
     def signal_handler(signum, frame):
         for p in processes:
             p.terminate()
+        curses.endwin()  # Ensure curses is terminated
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -350,3 +393,4 @@ if __name__ == "__main__":
         for p in processes:
             p.terminate()
             p.join()
+            curses.endwin() # Ensure curses is terminated

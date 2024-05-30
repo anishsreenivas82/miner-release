@@ -15,7 +15,7 @@ from multiprocessing import Process, set_start_method
 from auth.generator import WalletGenerator
 from tabulate import tabulate
 import curses
-# import pynvml
+from pynvml import *
  
 from sd_mining_core.base import BaseConfig, ModelUpdater
 from sd_mining_core.utils import (
@@ -227,19 +227,19 @@ def parse_log_file(log_file_path):
         if "WARNING" in line:
             metrics['failed_jobs'] += 1
  
-    # with pynvml.nvmlInit():
-    #     device_count = pynvml.nvmlDeviceGetCount()
-    #     for i in range(device_count):
-    #         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-    #         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-    #         gpu_usage = utilization.gpu
-    #         metrics['gpu_usage'].append(gpu_usage)
-    #     pynvml.nvmlShutdown()
+    nvmlInit()
+    device_count = nvmlDeviceGetCount()
+    for i in range(device_count):
+        handle = nvmlDeviceGetHandleByIndex(i)
+        utilization = nvmlDeviceGetUtilizationRates(handle)
+        gpu_usage = utilization.gpu
+        metrics['gpu_usage'].append(gpu_usage)
+    nvmlShutdown()
  
     avg_latency = sum(metrics['latency']) / len(metrics['latency']) if metrics['latency'] else 0
  
     return {
-        'gpu_usage': 0,
+        'gpu_usage': metrics['gpu_usage'],
         'num_jobs': metrics['num_jobs'],
         'success_jobs': metrics['success_jobs'],
         'failed_jobs': metrics['failed_jobs'],
@@ -268,16 +268,20 @@ def display_data_thread(log_file_path, display_interval):
             metrics = parse_log_file(log_file_path)
             stdscr.clear()
             stdscr.addstr(0, 0, "Mining Data")
+            # Initialize the table with the Metric and Value headers
+            table_data = [["Metric", "Value"]]
 
-            table_data = [
-                ["Metric", "Value"],
-                ["GPU Usage",  metrics['gpu_usage']],
-                ["Number of Concurrent Jobs", metrics['num_jobs']],
-                ["Successful Jobs", metrics['success_jobs']],
-                ["Failed Jobs", metrics['failed_jobs']],
-                ["Average Latency", f"{metrics['latency']:.2f} s"],
-                ["Jobs Being Processed", metrics['jobs_being_processed']]
-            ]
+            # Add rows for each GPU usage
+            for i, usage in enumerate(metrics['gpu_usage']):
+                table_data.append([f"GPU{i} Usage", f"{usage}%"])
+
+            # Add rows for each other metric
+            table_data.append(["Number of Concurrent Jobs", metrics['num_jobs']])
+            table_data.append(["Successful Jobs", metrics['success_jobs']])
+            table_data.append(["Failed Jobs", metrics['failed_jobs']])
+            table_data.append(["Average Latency", f"{metrics['latency']:.2f} s"])
+            table_data.append(["Jobs Being Processed", metrics['jobs_being_processed']])
+
             
             # Transpose the table data
             transposed_data = list(zip(*table_data))

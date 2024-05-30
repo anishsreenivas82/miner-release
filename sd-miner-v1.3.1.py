@@ -26,6 +26,9 @@ from sd_mining_core.utils import (
     load_default_model, reload_model,
 )
 
+# Marker to indicate the start of a new run
+RUN_MARKER = "INFO - Starting new run"
+
 class MinerConfig(BaseConfig):
     def __init__(self, config_file, cuda_device_id=0):
         super().__init__(config_file, cuda_device_id)
@@ -175,49 +178,54 @@ def parse_log_file(log_file_path):
     }
  
     with open(log_file_path, 'r') as log_file:
-        for line in log_file:
-            device_match = device_info_pattern.search(line)
-            if device_match:
-                device_id = int(device_match.group(1))
-                device_name = device_match.group(2)
-                devices[device_id] = {
-                    'Device Name': device_name,
-                    'Status': 'Idle',
-                    'Job ID': None,
-                    'Model ID': None,
-                    'Total Time': None,
-                    'Request Latency': None,
-                    'Loading Latency': None,
-                    'Inference Latency': None,
-                    'Upload Latency': None,
-                    'Submit Latency': None
-                }
- 
-            if job_received_match := job_received_pattern.search(line):
-                try:
-                    job_response = json.loads(job_received_match.group(1).replace("'", "\""))
-                except json.JSONDecodeError:
-                    continue
- 
-            if "Processing Request ID" in line:
-                metrics['jobs_being_processed'] += 1
-                metrics['num_jobs'] += 1
- 
-            # if job_processing_match := job_processing_pattern.search(line):
-            #     device_id = int(job_processing_match.group(1))
-            #     if device_id in devices:
-            #         devices[device_id]['Status'] = 'Processing'
-            #         devices[device_id]['Job ID'] = job_processing_match.group(1)
-            #         devices[device_id]['Model ID'] = job_processing_match.group(2)
- 
-            if job_completed_match := job_completed_pattern.search(line):
-                metrics['success_jobs'] += 1
-                metrics['jobs_being_processed'] -= 1
-                total_time = float(job_completed_match.group(2))
-                metrics['latency'].append(total_time)
- 
-            if "WARNING" in line:
-                metrics['failed_jobs'] += 1
+        log_lines = log_file.readlines()
+    
+    # Find the last occurrence of the run marker
+    start_index = next(i for i in reversed(range(len(log_lines))) if RUN_MARKER in log_lines[i]) + 1
+
+    for line in log_lines[start_index:]:
+        device_match = device_info_pattern.search(line)
+        if device_match:
+            device_id = int(device_match.group(1))
+            device_name = device_match.group(2)
+            devices[device_id] = {
+                'Device Name': device_name,
+                'Status': 'Idle',
+                'Job ID': None,
+                'Model ID': None,
+                'Total Time': None,
+                'Request Latency': None,
+                'Loading Latency': None,
+                'Inference Latency': None,
+                'Upload Latency': None,
+                'Submit Latency': None
+            }
+
+        if job_received_match := job_received_pattern.search(line):
+            try:
+                job_response = json.loads(job_received_match.group(1).replace("'", "\""))
+            except json.JSONDecodeError:
+                continue
+
+        if "Processing Request ID" in line:
+            metrics['jobs_being_processed'] += 1
+            metrics['num_jobs'] += 1
+
+        # if job_processing_match := job_processing_pattern.search(line):
+        #     device_id = int(job_processing_match.group(1))
+        #     if device_id in devices:
+        #         devices[device_id]['Status'] = 'Processing'
+        #         devices[device_id]['Job ID'] = job_processing_match.group(1)
+        #         devices[device_id]['Model ID'] = job_processing_match.group(2)
+
+        if job_completed_match := job_completed_pattern.search(line):
+            metrics['success_jobs'] += 1
+            metrics['jobs_being_processed'] -= 1
+            total_time = float(job_completed_match.group(2))
+            metrics['latency'].append(total_time)
+
+        if "WARNING" in line:
+            metrics['failed_jobs'] += 1
  
     # with pynvml.nvmlInit():
     #     device_count = pynvml.nvmlDeviceGetCount()
@@ -371,6 +379,9 @@ if __name__ == "__main__":
     # Start the model updater in a separate thread
     updater_thread = threading.Thread(target=model_updater.start_scheduled_updates)
     updater_thread.start()
+
+    # Write the marker indicating the start of a new run
+    logging.info(RUN_MARKER)
 
     display_interval = 10  # Display interval in seconds
     display_thread = threading.Thread(target=display_data_thread, args=('./sd-miner_0_0x1c83C85b57117E73f1195c37316b2E99B481aD6e-7bac77.log', display_interval))
